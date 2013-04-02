@@ -1,5 +1,25 @@
 #!/usr/bin/python
 
+# Prompt:
+#
+# You are to design a simple Python program where you create two threads, Ping and Pong, to alternately display
+# "Ping" and "Pong" respectively on the console.  The program should create output that looks like this:
+#
+# Ready... Set... Go!
+#
+# Ping!
+# Pong!
+# Ping!
+# Pong!
+# Ping!
+# Pong!
+# Done!
+#
+# It is up to you to determine how to ensure that the two threads alternate printing on the console, and how to
+# ensure that the main thread waits until they are finished to print: "Done!"  The order does not matter
+# (it could start with "Ping!" or "Pong!").
+#
+
 import sys
 import threading
 from Queue import Queue
