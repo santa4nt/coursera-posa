@@ -4,27 +4,37 @@ import sys
 import threading
 
 
+stdout_lock = threading.RLock()     # a global lock to synchronize printing to stdout console
+def syncprint(string):
+    stdout_lock.acquire()
+    print string
+    stdout_lock.release()
+
+
 class Chopstick(object):
 
     def __init__(self):
         self._cond = threading.Condition()
         self._holder = None
+        self._queue = []    # holds philosophers (should only be one) waiting on this chopstick
 
     def acquire(self, who, descr=''):
         # blocks until released by its current owner
         assert who
 
         # sanity check: attempting to acquire already-owned resource
-        if self._holder == who:
+        if self._holder is who:
             return
 
         self._cond.acquire()
 
-        while self._holder:
-            self._cond.wait()   # blocks until notified by current owner
+        while self._holder and self._holder is not who:
+            self._queue.append(who)     # add the waiting phiolosopher to this resource's "queue"
+            self._cond.wait()           # blocks until notified by current owner
         # this chopstick is available at this point
         self._holder = who
-        print '%s picks up %s chopstick.' % (str(who), descr)
+
+        syncprint('%s picks up %s chopstick.' % (str(who), descr))
 
         self._cond.release()
 
@@ -37,8 +47,12 @@ class Chopstick(object):
 
         self._cond.acquire()
 
-        print '%s puts down %s chopstick.' % (str(self._holder), descr)
-        self._holder = None     # make this chopstick available
+        syncprint('%s puts down %s chopstick.' % (str(self._holder), descr))
+        
+        # when releasing this resource, first see if there is anyone waiting on it;
+        # if so, we give it to him
+        who = self._queue.pop() if self._queue else None
+        self._holder = who
         self._cond.notify()
 
         self._cond.release()
@@ -76,7 +90,7 @@ class Philosopher(object):
     def run(self):
         while self.portions:
             self._acquire_chopsticks()
-            print '%s eats.' % str(self)
+            syncprint('%s eats.' % str(self))
             self._release_chopsticks()
             self.portions -= 1
 
