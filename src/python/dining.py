@@ -16,10 +16,45 @@ class Chopstick(object):
     def __init__(self):
         self._cond = threading.Condition()
         self._holder = None
-        self._queue = []    # holds philosophers (should only be one) waiting on this chopstick
+        # the "dirty" flag serves as a mechanism to prevent deadlock AND starvation
+        # if this resource (chopstick) is "dirty", the current holder must give it up when asked
+        # moreover, if the current holder is sending it over, he must clean it first
+        self._dirty = False      
 
-    def acquire(self, who, descr=''):
-        # blocks until released by its current owner
+    @property
+    def dirty(self):
+        return self._dirty
+
+    @property
+    def clean(self):
+        return not self._dirty
+
+    def _init_holder(self, who):
+        """Initialization function: set the initial holder of this resource, and mark it as dirty.
+
+        """
+        who.pickup(self)
+        self._holder = who
+        self._dirty = True
+
+    def mark_dirty(self):
+        # since we might have philosophers waiting for this chopstick to become dirty,
+        # we do additional notification on top of marking this chopstick dirty
+        self._cond.acquire()
+        self._dirty = True
+        self._cond.notify()
+        self._cond.release()
+
+    def mark_clean(self):
+        self._dirty = False
+
+    def acquire(self, who):
+        """Send a request to the current holder to acquire this resource.
+
+        If the current holder is holding a "clean" resource (i.e. they have yet to use the
+        resource), then this call will block until notified by the current holder.
+
+        """
         assert who
 
         # sanity check: attempting to acquire already-owned resource
@@ -28,32 +63,19 @@ class Chopstick(object):
 
         self._cond.acquire()
 
-        while self._holder and self._holder is not who:
-            self._queue.append(who)     # add the waiting phiolosopher to this resource's "queue"
-            self._cond.wait()           # blocks until notified by current owner
-        # this chopstick is available at this point
-        self._holder = who
+        while self._holder is not who:
+            if self.dirty:
+                # the current holder is holding a "dirty" resource, he must give it up
+                self._holder.putdown(self)  # he marks the resource clean (and prints out action to stdout)
+                self._holder = who
+            else:
+                # the current holder has not had a chance to use the resource yet (it is "clean")
+                # so we block until the former notifies us that he is done
+                self._cond.wait()
+                # when we wake up, the resource should now have been marked "dirty"
+                assert self.dirty
 
-        syncprint('%s picks up %s chopstick.' % (str(who), descr))
-
-        self._cond.release()
-
-    def release(self, descr=''):
-        # release ownership of this chopstick
-
-        # sanity check: if not owned by anyone, bail
-        if not self._holder:
-            return
-
-        self._cond.acquire()
-
-        syncprint('%s puts down %s chopstick.' % (str(self._holder), descr))
-        
-        # when releasing this resource, first see if there is anyone waiting on it;
-        # if so, we give it to him
-        who = self._queue.pop() if self._queue else None
-        self._holder = who
-        self._cond.notify()
+        self._holder.pickup(self)   # prints out action to stdout
 
         self._cond.release()
 
@@ -79,19 +101,54 @@ class Philosopher(object):
     def right(self):
         return self._right
 
-    def _acquire_chopsticks(self):
-        self._left.acquire(self, 'left')
-        self._right.acquire(self, 'right')
+    def putdown(self, chopstick):
+        """The intermediary step in the process of giving up the chopstick resource
+        to a contending neighbor.
 
-    def _release_chopsticks(self):
-        self._left.release('left')
-        self._right.release('right')
+        We mark the resource as "clean", and print out our action to stdout.
+
+        """
+        if chopstick is self.left:
+            which = 'left'
+        elif chopstick is self.right:
+            which = 'right'
+        else:
+            assert False
+
+        chopstick.mark_clean()
+        syncprint('%s puts down %s chopstick.' % (str(self), which))
+
+    def pickup(self, chopstick):
+        """The intermediary step in the process of receiving a chopstick that a
+        contending neighbor is giving up.
+
+        At this point, said neighbor should already have marked this resource "clean".
+
+        """
+        if chopstick is self.left:
+            which = 'left'
+        elif chopstick is self.right:
+            which = 'right'
+        else:
+            assert False
+
+        assert chopstick.clean
+        syncprint('%s picks up %s chopstick.' % (str(self), which))
+
+    def _acquire_chopsticks(self):
+        self._left.acquire(self)
+        self._right.acquire(self)
+
+    def _eat(self):
+        syncprint('%s eats.' % str(self))
+        # the process of eating would mark the resources uses as "dirty"
+        self._left.mark_dirty()
+        self._right.mark_dirty()
 
     def run(self):
         while self.portions:
             self._acquire_chopsticks()
-            syncprint('%s eats.' % str(self))
-            self._release_chopsticks()
+            self._eat()
             self.portions -= 1
 
     def __str__(self):
@@ -125,11 +182,11 @@ def main(args):
     print
 
     # initially, assign each shared chopstick to the lower-numbered philosopher
-    a.acquire(p1)
-    b.acquire(p2)
-    c.acquire(p3)
-    d.acquire(p4)
-    e.acquire(p1)   # this breaks the cycle in the initial state!
+    a._init_holder(p1)
+    b._init_holder(p2)
+    c._init_holder(p3)
+    d._init_holder(p4)
+    e._init_holder(p1)   # this breaks the cycle in the initial state!
 
     for t in threads:
         t.start()
