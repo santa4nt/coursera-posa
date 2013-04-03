@@ -145,6 +145,23 @@ public class Dining {
     static class Waiter implements PhilosopherListener {
 
         /**
+         * Only one philosopher at a time can "ask permission" from the waiter to use their shared resources
+         * (i.e. chopsticks). If the resource in question is in use, sleep (wait) until notified. Otherwise,
+         * or when finally notified that the chopstick is now available, the thread that invoked this permission
+         * will mark said chopstick as dirty.
+         */
+        public synchronized void askPermissionForChopstick(Chopstick chopstick, Philosopher philosopher)
+                throws InterruptedException {
+            // since it is already the case that only one philosopher at a time "talks to" the only one waiter,
+            // we do not need to further synchronize on the shared resource (chopstick in this case)
+            while (chopstick.getHolder() != null)
+                wait();     // so, we simply wait for this waiter to notify us when the chopstick is ready
+
+            // if we get here, then the chopstick is ready; take ownership
+            chopstick.setHolder(philosopher);
+        }
+
+        /**
          * When a philosopher finishes eating, the waiter makes him relinguish his chopstick, and subsequently
          * notifies all philosophers that are currently waiting on the former's chopsticks.
          * Note that since only one philosopher at a time can talk to the waiter, this callback method is also
@@ -155,37 +172,10 @@ public class Dining {
          */
         @Override
         public synchronized void onFinishedEating(Philosopher who) {
-            // note that we need to also own the monitor of each chopstick to notify its waiting philosopher
-            Chopstick left = who.getLeftChopstick();
-            Chopstick right = who.getRightChopstick();
-
-            synchronized (left) {
-                left.setHolder(null);
-                left.notifyAll();
-            }
-
-            synchronized (right) {
-                right.setHolder(null);
-                right.notifyAll();
-            }
-        }
-
-        /**
-         * Only one philosopher at a time can "ask permission" from the waiter to use their shared resources
-         * (i.e. chopsticks). If the resource in question is in use, sleep (wait) until notified. Otherwise,
-         * or when finally notified that the chopstick is now available, the thread that invoked this permission
-         * will mark said chopstick as dirty.
-         */
-        public synchronized void askPermissionForChopstick(Chopstick chopstick, Philosopher philosopher)
-                throws InterruptedException {
-            synchronized (chopstick) {      // we need to own the monitor on said chopstick to wait on it
-                while (chopstick.getHolder() != null)
-                    chopstick.wait();       // the problem here is that when we call .wait(), we release our
-                                            // monitor on chopstick, but not on the waiter!
-                                            // this causes other threads that are waiting to just "talk" to
-                                            // the waiter to block indefinitely!
-                chopstick.setHolder(philosopher);
-            }
+            // relinguish ownership of each chopstick, and notify its waiting philosophers
+            who.getLeftChopstick().setHolder(null);
+            who.getRightChopstick().setHolder(null);
+            notifyAll();
         }
 
     }
