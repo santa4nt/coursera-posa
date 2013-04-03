@@ -96,13 +96,10 @@ public class Dining {
             return right;
         }
 
-        public void pickUpChopsticks() throws InterruptedException {
-            // each of these calls potentially blocks until notified (by the waiter)
-            waiter.askPermissionForChopstick(left, this); System.out.println(this.toString() + " picks up left chopstick.");
-            waiter.askPermissionForChopstick(right, this); System.out.println(this.toString() + " picks up right chopstick.");
-        }
+        public void eat() throws InterruptedException {
+            // blocks until the waiter says so
+            waiter.askPermissionToEat(this);
 
-        public void eat() {
             System.out.println(this.toString() + " eats.");
             finishEating();
         }
@@ -122,7 +119,6 @@ public class Dining {
             int portion = 5;    // each philosopher eats five times
             try {
                 for (; portion >=0; portion--) {
-                    pickUpChopsticks();
                     eat();
                 }
             } catch (InterruptedException e) {
@@ -146,23 +142,29 @@ public class Dining {
 
         /**
          * Only one philosopher at a time can "ask permission" from the waiter to use their shared resources
-         * (i.e. chopsticks). If the resource in question is in use, sleep (wait) until notified. Otherwise,
-         * or when finally notified that the chopstick is now available, the thread that invoked this permission
-         * will mark said chopstick as dirty.
+         * (i.e. chopsticks). The waiter, as the conductor, assesses whether any of the two chopsticks on either
+         * side of the philosopher is currently in use. If so, then the philosopher will think (i.e. block on
+         * this call) until notified by the waiter at a later time.
+         *
+         * @param who the philosopher who is asking permission to proceed to eat
          */
-        public synchronized void askPermissionForChopstick(Chopstick chopstick, Philosopher philosopher)
+        public synchronized void askPermissionToEat(Philosopher who)
                 throws InterruptedException {
             // since it is already the case that only one philosopher at a time "talks to" the only one waiter,
             // we do not need to further synchronize on the shared resource (chopstick in this case)
-            while (chopstick.getHolder() != null)
-                wait();     // so, we simply wait for this waiter to notify us when the chopstick is ready
+            Chopstick left = who.getLeftChopstick();
+            Chopstick right = who.getRightChopstick();
 
-            // if we get here, then the chopstick is ready; take ownership
-            chopstick.setHolder(philosopher);
+            while (left.getHolder() != null && right.getHolder() != null)
+                wait();     // blocks until this waiter notify us when the chopstick is ready
+
+            // if we get here, then both chopsticks are ready; take ownership
+            left.setHolder(who); System.out.println(who.toString() + " picks up left chopstick.");
+            right.setHolder(who); System.out.println(who.toString() + " picks up right chopstick.");
         }
 
         /**
-         * When a philosopher finishes eating, the waiter makes him relinguish his chopstick, and subsequently
+         * When a philosopher finishes eating, the waiter makes him relinguish his chopsticks, and subsequently
          * notifies all philosophers that are currently waiting on the former's chopsticks.
          * Note that since only one philosopher at a time can talk to the waiter, this callback method is also
          * marked synchronized, forcing each philosopher to own the monitor on this waiter object before invoking
@@ -173,8 +175,8 @@ public class Dining {
         @Override
         public synchronized void onFinishedEating(Philosopher who) {
             // relinguish ownership of each chopstick, and notify its waiting philosophers
-            who.getLeftChopstick().setHolder(null);
-            who.getRightChopstick().setHolder(null);
+            who.getLeftChopstick().setHolder(null); System.out.println(who.toString() + " puts down left chopstick.");
+            who.getRightChopstick().setHolder(null); System.out.println(who.toString() + " puts down right chopstick.");
             notifyAll();
         }
 
