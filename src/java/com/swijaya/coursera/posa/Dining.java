@@ -180,7 +180,10 @@ public class Dining {
                 throws InterruptedException {
             synchronized (chopstick) {      // we need to own the monitor on said chopstick to wait on it
                 while (chopstick.getHolder() != null)
-                    chopstick.wait();
+                    chopstick.wait();       // the problem here is that when we call .wait(), we release our
+                                            // monitor on chopstick, but not on the waiter!
+                                            // this causes other threads that are waiting to just "talk" to
+                                            // the waiter to block indefinitely!
                 chopstick.setHolder(philosopher);
             }
         }
