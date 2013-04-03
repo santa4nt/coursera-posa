@@ -46,14 +46,24 @@ public class Dining {
 
     static class Chopstick {
 
-        private boolean dirty;      // if true, this chopstick is in use
+        private char id;
+        private Philosopher holder = null;
 
-        public boolean isDirty() {
-            return dirty;
+        public Chopstick(char id) {
+            this.id = id;
         }
 
-        public void markDirty() {
-            dirty = true;
+        public void setHolder(Philosopher holder) {
+            this.holder = holder;
+        }
+
+        public Philosopher getHolder() {
+            return holder;
+        }
+
+        @Override
+        public String toString() {
+            return "Chopstick " + id;
         }
 
     }
@@ -88,8 +98,8 @@ public class Dining {
 
         public void pickUpChopsticks() throws InterruptedException {
             // each of these calls potentially blocks until notified (by the waiter)
-            waiter.askPermissionForChopstick(left); System.out.println(this.toString() + " picks up left chopstick.");
-            waiter.askPermissionForChopstick(right); System.out.println(this.toString() + " picks up right chopstick.");
+            waiter.askPermissionForChopstick(left, this); System.out.println(this.toString() + " picks up left chopstick.");
+            waiter.askPermissionForChopstick(right, this); System.out.println(this.toString() + " picks up right chopstick.");
         }
 
         public void eat() {
@@ -135,10 +145,11 @@ public class Dining {
     static class Waiter implements PhilosopherListener {
 
         /**
-         * When a philosopher finishes eating, the waiter notifies all philosophers that are currently waiting
-         * on the former's chopsticks. Note that since only one philosopher at a time can talk to the waiter,
-         * this callback method is also marked synchronized, forcing each philosopher to own the monitor on
-         * this waiter object before invoking this callback.
+         * When a philosopher finishes eating, the waiter makes him relinguish his chopstick, and subsequently
+         * notifies all philosophers that are currently waiting on the former's chopsticks.
+         * Note that since only one philosopher at a time can talk to the waiter, this callback method is also
+         * marked synchronized, forcing each philosopher to own the monitor on this waiter object before invoking
+         * this callback.
          *
          * @param who the philosopher that just finished eating
          */
@@ -149,10 +160,12 @@ public class Dining {
             Chopstick right = who.getRightChopstick();
 
             synchronized (left) {
+                left.setHolder(null);
                 left.notifyAll();
             }
 
             synchronized (right) {
+                right.setHolder(null);
                 right.notifyAll();
             }
         }
@@ -163,11 +176,12 @@ public class Dining {
          * or when finally notified that the chopstick is now available, the thread that invoked this permission
          * will mark said chopstick as dirty.
          */
-        public synchronized void askPermissionForChopstick(Chopstick chopstick) throws InterruptedException {
+        public synchronized void askPermissionForChopstick(Chopstick chopstick, Philosopher philosopher)
+                throws InterruptedException {
             synchronized (chopstick) {      // we need to own the monitor on said chopstick to wait on it
-                if (chopstick.isDirty())
+                while (chopstick.getHolder() != null)
                     chopstick.wait();
-                chopstick.markDirty();
+                chopstick.setHolder(philosopher);
             }
         }
 
@@ -177,18 +191,18 @@ public class Dining {
         // first, let's set the stage: five philosopher, five shared chopsticks, and one waiter (monitor)
         Waiter waiter = new Waiter();
         Chopstick[] chopsticks = new Chopstick[] {
-                new Chopstick(),
-                new Chopstick(),
-                new Chopstick(),
-                new Chopstick(),
-                new Chopstick()
+                new Chopstick('a'),
+                new Chopstick('b'),
+                new Chopstick('c'),
+                new Chopstick('d'),
+                new Chopstick('e')
         };
         Philosopher[] philosophers = new Philosopher[] {
-                new Philosopher(1, chopsticks[0], chopsticks[1], waiter),
-                new Philosopher(2, chopsticks[1], chopsticks[2], waiter),
-                new Philosopher(3, chopsticks[2], chopsticks[3], waiter),
-                new Philosopher(4, chopsticks[3], chopsticks[4], waiter),
-                new Philosopher(5, chopsticks[4], chopsticks[0], waiter)
+                new Philosopher(1, chopsticks[0], chopsticks[4], waiter),
+                new Philosopher(2, chopsticks[1], chopsticks[0], waiter),
+                new Philosopher(3, chopsticks[2], chopsticks[1], waiter),
+                new Philosopher(4, chopsticks[3], chopsticks[2], waiter),
+                new Philosopher(5, chopsticks[4], chopsticks[3], waiter)
         };
 
         System.out.println("Dinner is starting!\n");
