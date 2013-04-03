@@ -40,6 +40,59 @@ package com.swijaya.coursera.posa;
 
 public class Dining {
 
+    interface PhilosopherListener {
+        public void onFinishedEating(Philosopher who);
+    }
+
+    static class Chopstick {}
+
+    static class Philosopher extends Thread {
+
+        private PhilosopherListener listener;
+        private Chopstick left, right;
+        private Waiter waiter;                  // both a monitor and a subscriber
+
+        public Philosopher(Chopstick left, Chopstick right, Waiter waiter) {
+            this.left = left;
+            this.right = right;
+            this.waiter = waiter;
+            addPhilosopherListener(waiter);
+        }
+
+        protected void addPhilosopherListener(PhilosopherListener listener) {
+            assert (listener != null);
+            this.listener = listener;
+        }
+
+        /**
+         * Publish a "finished eating" event, where the subscriber's onFinishedEating() callback will be invoked.
+         * Here, each callback is invoked when this philosopher is done eating for this round.
+         */
+        public void finishEating() {
+            if (listener != null)
+                listener.onFinishedEating(this);
+        }
+
+        @Override
+        public void run() {
+            // TODO
+        }
+    }
+
+    /**
+     * As the synchronizing Monitor Object, the waiter observes the state of the "table": the state of each
+     * philosopher and what resources (chopsticks) they hold. The waiter also acts as individual philosopher's
+     * subscriber that gets called back when each philosopher is "done eating" for a round.
+     */
+    static class Waiter implements PhilosopherListener {
+
+        @Override
+        public void onFinishedEating(Philosopher who) {
+            // TODO
+        }
+
+    }
+
     public static void main(String[] args) throws Exception {
     }
 
