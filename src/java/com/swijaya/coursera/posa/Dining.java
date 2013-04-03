@@ -44,38 +44,86 @@ public class Dining {
         public void onFinishedEating(Philosopher who);
     }
 
-    static class Chopstick {}
+    static class Chopstick {
+
+        private boolean dirty;      // if true, this chopstick is in use
+
+        public boolean isDirty() {
+            return dirty;
+        }
+
+        public void markDirty() {
+            dirty = true;
+        }
+
+    }
 
     static class Philosopher extends Thread {
 
-        private PhilosopherListener listener;
+        private int id;
         private Chopstick left, right;
         private Waiter waiter;                  // both a monitor and a subscriber
+        private PhilosopherListener listener;
 
-        public Philosopher(Chopstick left, Chopstick right, Waiter waiter) {
+        public Philosopher(int id, Chopstick left, Chopstick right, Waiter waiter) {
+            this.id = id;
             this.left = left;
             this.right = right;
             this.waiter = waiter;
-            addPhilosopherListener(waiter);
+            setPhilosopherListener(waiter);
         }
 
-        protected void addPhilosopherListener(PhilosopherListener listener) {
+        protected void setPhilosopherListener(PhilosopherListener listener) {
             assert (listener != null);
             this.listener = listener;
+        }
+
+        public Chopstick getLeftChopstick() {
+            return left;
+        }
+
+        public Chopstick getRightChopstick() {
+            return right;
+        }
+
+        public void pickUpChopsticks() throws InterruptedException {
+            // each of these calls potentially blocks until notified (by the waiter)
+            waiter.askPermissionForChopstick(left); System.out.println(this.toString() + " picks up left chopstick.");
+            waiter.askPermissionForChopstick(right); System.out.println(this.toString() + " picks up right chopstick.");
+        }
+
+        public void eat() {
+            System.out.println(this.toString() + " eats.");
+            finishEating();
         }
 
         /**
          * Publish a "finished eating" event, where the subscriber's onFinishedEating() callback will be invoked.
          * Here, each callback is invoked when this philosopher is done eating for this round.
          */
-        public void finishEating() {
+        private void finishEating() {
+            assert (listener != null);
             if (listener != null)
                 listener.onFinishedEating(this);
         }
 
         @Override
         public void run() {
-            // TODO
+            int portion = 5;    // each philosopher eats five times
+            try {
+                for (; portion >=0; portion--) {
+                    pickUpChopsticks();
+                    eat();
+                }
+            } catch (InterruptedException e) {
+                System.err.println(this.toString() + " choked!");
+                e.printStackTrace();
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "Philosopher " + id;
         }
     }
 
@@ -86,14 +134,74 @@ public class Dining {
      */
     static class Waiter implements PhilosopherListener {
 
+        /**
+         * When a philosopher finishes eating, the waiter notifies all philosophers that are currently waiting
+         * on the former's chopsticks. Note that since only one philosopher at a time can talk to the waiter,
+         * this callback method is also marked synchronized, forcing each philosopher to own the monitor on
+         * this waiter object before invoking this callback.
+         *
+         * @param who the philosopher that just finished eating
+         */
         @Override
-        public void onFinishedEating(Philosopher who) {
-            // TODO
+        public synchronized void onFinishedEating(Philosopher who) {
+            // note that we need to also own the monitor of each chopstick to notify its waiting philosopher
+            Chopstick left = who.getLeftChopstick();
+            Chopstick right = who.getRightChopstick();
+
+            synchronized (left) {
+                left.notifyAll();
+            }
+
+            synchronized (right) {
+                right.notifyAll();
+            }
+        }
+
+        /**
+         * Only one philosopher at a time can "ask permission" from the waiter to use their shared resources
+         * (i.e. chopsticks). If the resource in question is in use, sleep (wait) until notified. Otherwise,
+         * or when finally notified that the chopstick is now available, the thread that invoked this permission
+         * will mark said chopstick as dirty.
+         */
+        public synchronized void askPermissionForChopstick(Chopstick chopstick) throws InterruptedException {
+            synchronized (chopstick) {      // we need to own the monitor on said chopstick to wait on it
+                if (chopstick.isDirty())
+                    chopstick.wait();
+                chopstick.markDirty();
+            }
         }
 
     }
 
     public static void main(String[] args) throws Exception {
+        // first, let's set the stage: five philosopher, five shared chopsticks, and one waiter (monitor)
+        Waiter waiter = new Waiter();
+        Chopstick[] chopsticks = new Chopstick[] {
+                new Chopstick(),
+                new Chopstick(),
+                new Chopstick(),
+                new Chopstick(),
+                new Chopstick()
+        };
+        Philosopher[] philosophers = new Philosopher[] {
+                new Philosopher(1, chopsticks[0], chopsticks[1], waiter),
+                new Philosopher(2, chopsticks[1], chopsticks[2], waiter),
+                new Philosopher(3, chopsticks[2], chopsticks[3], waiter),
+                new Philosopher(4, chopsticks[3], chopsticks[4], waiter),
+                new Philosopher(5, chopsticks[4], chopsticks[0], waiter)
+        };
+
+        System.out.println("Dinner is starting!\n");
+
+        for (Philosopher philosopher : philosophers) {
+            philosopher.start();
+        }
+
+        for (Philosopher philosopher : philosophers) {
+            philosopher.join();
+        }
+
+        System.out.println("\nDinner is over!");
     }
 
 }
