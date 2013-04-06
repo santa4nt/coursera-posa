@@ -2,6 +2,7 @@
 
 import sys
 import threading
+from Queue import Queue, Empty
 
 
 stdout_lock = threading.RLock()     # a global lock to synchronize printing to stdout console
@@ -11,15 +12,23 @@ def syncprint(string):
     stdout_lock.release()
 
 
-class Chopstick(object):
+REQUEST = 0
+RESPONSE = 1
 
-    def __init__(self):
-        self._cond = threading.Condition()
+
+class Resource(object):
+
+    def __init__(self, num):
+        self._num = num
         self._holder = None
         # the "dirty" flag serves as a mechanism to prevent deadlock AND starvation
         # if this resource (chopstick) is "dirty", the current holder must give it up when asked
         # moreover, if the current holder is sending it over, he must clean it first
         self._dirty = False      
+
+    @property
+    def num(self):
+        return self._num
 
     @property
     def dirty(self):
@@ -29,127 +38,169 @@ class Chopstick(object):
     def clean(self):
         return not self._dirty
 
-    def _init_holder(self, who):
-        """Initialization function: set the initial holder of this resource, and mark it as dirty.
+    @property
+    def holder(self):
+        return self._holder
 
-        """
-        who.pickup(self)
-        self._holder = who
-        self._dirty = True
+    @holder.setter
+    def holder(self, holder):
+        self._holder = holder
 
     def mark_dirty(self):
-        # since we might have philosophers waiting for this chopstick to become dirty,
-        # we do additional notification on top of marking this chopstick dirty
-        self._cond.acquire()
         self._dirty = True
-        self._cond.notify()
-        self._cond.release()
 
     def mark_clean(self):
         self._dirty = False
 
-    def acquire(self, who):
-        """Send a request to the current holder to acquire this resource.
-
-        If the current holder is holding a "clean" resource (i.e. they have yet to use the
-        resource), then this call will block until notified by the current holder.
-
-        """
-        assert who
-
-        # sanity check: attempting to acquire already-owned resource
-        if self._holder is who:
-            return
-
-        self._cond.acquire()
-
-        while self._holder is not who:
-            if self.dirty:
-                # the current holder is holding a "dirty" resource, he must give it up
-                self._holder.putdown(self)  # he marks the resource clean (and prints out action to stdout)
-                self._holder = who
-            else:
-                # the current holder has not had a chance to use the resource yet (it is "clean")
-                # so we block until the former notifies us that he is done
-                self._cond.wait()
-                # when we wake up, the resource should now have been marked "dirty"
-                assert self.dirty
-
-        self._holder.pickup(self)   # prints out action to stdout
-
-        self._cond.release()
+    def __str__(self):
+        return 'Resource(%s, dirty=%s)' % (repr(self._num), str(self._dirty))
 
 
-class Philosopher(object):
+class Agent(object):
 
-    portions = 5
-
-    def __init__(self, num, left, right):
+    def __init__(self, num, resources_needed, capacity=5):
         self._num = num
-        self._left = left
-        self._right = right
+        self._res_needed = resources_needed
+        self._res_held = []
+        self._neighbors = []
+
+        # the number of times this agent does work
+        self._capacity = capacity
+        self._counter = 0
+
+        # for message passing mechanism
+        self._queue = Queue(maxsize=5)
+        self._pend_queue = []
+        self._alive = True
+
+    def initialize(self, neighbors, initial_resources_held):
+        self._neighbors = neighbors
+        for res in initial_resources_held:
+            self._res_held.append(res)
+            res.holder = self
 
     @property
     def num(self):
         return self._num
 
     @property
-    def left(self):
-        return self._left
+    def full(self):
+        return self._counter < self._capacity
 
     @property
-    def right(self):
-        return self._right
+    def alive(self):
+        return self._alive
 
-    def putdown(self, chopstick):
-        """The intermediary step in the process of giving up the chopstick resource
-        to a contending neighbor.
+    def eat(self):
+        """The "work" function.
 
-        We mark the resource as "clean", and print out our action to stdout.
-
-        """
-        if chopstick is self.left:
-            which = 'left'
-        elif chopstick is self.right:
-            which = 'right'
-        else:
-            assert False
-
-        chopstick.mark_clean()
-        syncprint('%s puts down %s chopstick.' % (str(self), which))
-
-    def pickup(self, chopstick):
-        """The intermediary step in the process of receiving a chopstick that a
-        contending neighbor is giving up.
-
-        At this point, said neighbor should already have marked this resource "clean".
+        Pre-condition: This agent owns the resources it needs.
+        Post-condition: Said resources are "dirty" after this work.
 
         """
-        if chopstick is self.left:
-            which = 'left'
-        elif chopstick is self.right:
-            which = 'right'
-        else:
-            assert False
-
-        assert chopstick.clean
-        syncprint('%s picks up %s chopstick.' % (str(self), which))
-
-    def _acquire_chopsticks(self):
-        self._left.acquire(self)
-        self._right.acquire(self)
-
-    def _eat(self):
+        assert set(self._res_held) >= set(self._res_needed)
         syncprint('%s eats.' % str(self))
-        # the process of eating would mark the resources uses as "dirty"
-        self._left.mark_dirty()
-        self._right.mark_dirty()
+        self._counter += 1
+        for res in self._res_held:
+            res.mark_dirty()
+
+    def clean(self, resource):
+        """The "cleaning" function of a held resource.
+
+        """
+        assert resource in self._res_held
+        if resource not in self._res_needed:
+            assert False
+            pass
+        resource.mark_clean()
+
+        # for printout purpose
+        if resource is self._res_needed[0]:
+            which = 'left'
+        elif resource is self._res_needed[1]:
+            which = 'right'
+        else:
+            assert False
+        print '%s puts down %s chopstick.' % (str(self), which)
+
+    def claim(self, resource):
+        """Claim a resource by putting it into the hold-list.
+
+        """
+        assert resource not in self._res_held
+        self._res_held.append(resource)
+        resource.holder = self
+
+        # for printout purpose
+        if resource is self._res_needed[0]:
+            which = 'left'
+        elif resource is self._res_needed[1]:
+            which = 'right'
+        else:
+            assert False
+        print '%s picks up %s chopstick.' % (str(self), which)
+
+    def send(self, msg):
+        """Send a message to this agent by putting said message in said agent's
+        internal queue. This call potentially blocks until a free slot is
+        available.
+
+        """
+        self._queue.put(msg)
 
     def run(self):
-        while self.portions:
-            self._acquire_chopsticks()
-            self._eat()
-            self.portions -= 1
+        while True:
+            # exit condition: we're at capacity and not holding any resource
+            if self.full and (len(self._res_held) == 0):
+                self._alive = False
+                return
+            elif not self.full:
+                # note that this branch should be no-op if we are already holding
+                # all the resources we need
+
+                # for each resource we need that we are not already holding
+                for res in [r in self._res_needed if r not in self._res_held]:
+                    for neighbor in [n in self._neighbors if n.alive]:
+                        # send a request for the required resource
+                        req = (REQUEST, self, res)
+                        neighbor.send(req)
+
+            # now, pop (block if empty) a message from this agent's message queue
+            try:
+                message = self._queue.get(block=False)
+            except Empty:
+                pass
+            else:
+                msgtype, source, resource = message
+                if msgtype == REQUEST:
+                    if resource not in self._res_held:
+                        # nothing to do, drop this message
+                        pass
+                    elif resource.clean:
+                        # our neighbor is requesting a clean resource, we can pend it
+                        self._pend_queue.append(message)
+                    else:
+                        # we are holding a dirty resource that is requested, we must give it up
+                        # remove the resource from our hold-list
+                        self._res_held = [res in self._res_held if res is not resource]
+                        self.clean(resource)
+                        resp = (RESPONSE, self, resource)
+                        source.send(resp)
+                elif msgtype == RESPONSE:
+                    assert resource.clean
+                    self.claim(resource)
+                else:
+                    assert False, 'Unknown message type'
+
+            # check if we can eat
+            if set(self._res_held) >= set(self._res_needed):
+                self.eat()
+                # now that we've potentially dirtied previously "clean" resources,
+                # we should merge back requests that we pended because they were asking
+                # for those resources
+                for msg in self._pend_queue:
+                    self.send(msg)      # take care not to block on this!
+                self._pend_queue = []
 
     def __str__(self):
         return 'Philosopher %d' % self.num
