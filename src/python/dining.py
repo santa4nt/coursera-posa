@@ -2,10 +2,10 @@
 
 import sys
 import threading
-from Queue import Queue, Empty, Full
+from Queue import PriorityQueue, Empty, Full
 
 
-DEBUG = 1
+DEBUG = 0
 
 stdout_lock = threading.RLock()     # a global lock to synchronize printing to stdout console
 def syncprint(string):
@@ -22,17 +22,21 @@ def dbgprint(string):
 
 class Message(object):
 
-    def __init__(self, msgtype):
+    def __init__(self, msgtype, priority):
         self.msgtype = msgtype
+        self.priority = priority
 
     def __str__(self):
         return repr(self)
 
     def __repr__(self):
-        return 'Message(%s)' % self.msgtype
+        return 'Message(%s,%d)' % (self.msgtype, self.priority)
 
-REQUEST = Message('REQUEST')
-RESPONSE = Message('RESPONSE')
+    def __lt__(self, other):
+        return self.priority < other.priority
+
+RESPONSE = Message('RESPONSE', 0)
+REQUEST = Message('REQUEST', 1)
 
 
 class Resource(object):
@@ -91,7 +95,7 @@ class Agent(object):
         self._counter = 0
 
         # for message passing mechanism
-        self._queue = Queue(maxsize=5)
+        self._queue = PriorityQueue(maxsize=5)
         self._pend_queue = []
         self._alive = True
 
@@ -121,8 +125,9 @@ class Agent(object):
 
         """
         assert set(self._res_held) >= set(self._res_needed)
-        syncprint('%s eats.' % str(self))
-        self._counter += 1
+        if not self.full:
+            syncprint('%s eats.' % str(self))
+            self._counter += 1
         for res in self._res_held:
             res.mark_dirty()
 
@@ -163,18 +168,28 @@ class Agent(object):
             assert False
         syncprint('%s picks up %s chopstick.' % (str(self), which))
 
-    def send(self, msg):
+    def send(self, msg, block=True):
         """Send a message to this agent by putting said message in said agent's
         internal queue. This call potentially blocks until a free slot is
         available.
 
         """
-        self._queue.put(msg)
+        #dbgprint('[%s] Current queue capacity (before message): %d' % (str(self), self._queue.qsize()))
+        if not block:
+            try:
+                self._queue.put(msg, block=False)
+            except Full:
+                dbgprint('!! Cannot deliver message %s to %s: queue is full' % (repr(msg), str(self)))
+                return False
+        else:
+            self._queue.put(msg)
+        return True
 
     def run(self):
         while True:
             # exit condition: we're at capacity and not holding any resource
             if self.full and (len(self._res_held) == 0):
+                dbgprint('[%s] Done eating. Exit.' % str(self))
                 self._alive = False
                 return
             elif not self.full:
@@ -188,7 +203,7 @@ class Agent(object):
                         if res.holder is neighbor:
                             req = (REQUEST, self, res)
                             dbgprint('[%s] sending request message to %s: %s' % (str(self), str(neighbor), repr(req)))
-                            neighbor.send(req)
+                            neighbor.send(req, block=False)     # it's okay to miss a request
 
             # now, pop (block if empty) a message from this agent's message queue
             try:
@@ -207,8 +222,12 @@ class Agent(object):
                     elif resource.clean:
                         # our neighbor is requesting a clean resource, we can pend it
                         assert resource.holder is self
-                        dbgprint('[%s] received a request for clean resource; pending said request' % str(self))
-                        self._pend_queue.append(message)
+                        if message not in self._pend_queue:
+                            dbgprint('[%s] received a request for clean resource; pending said request' % str(self))
+                            self._pend_queue.append(message)
+                        else:
+                            dbgprint('[%s] received a duplicate request that is already pended; dropping' % str(self))
+                            pass
                     else:
                         # we are holding a dirty resource that is requested, we must give it up
                         assert resource.holder is self
@@ -218,7 +237,7 @@ class Agent(object):
                         self._res_held = [res for res in self._res_held if res is not resource]
                         resp = (RESPONSE, self, resource)
                         dbgprint('[%s] sending response message to %s: %s' % (str(self), str(source), repr(resp)))
-                        source.send(resp)
+                        source.send(resp)   # must block on sending response as we don't want that to get missed
                 elif msgtype == RESPONSE:
                     assert resource.clean
                     dbgprint('[%s] got a response message; claiming resource' % str(self))
@@ -227,15 +246,25 @@ class Agent(object):
                     assert False, 'Unknown message type'
 
             # check if we can eat
-            if set(self._res_held) >= set(self._res_needed):
-                self.eat()
-                # now that we've potentially dirtied previously "clean" resources,
-                # we should merge back requests that we pended because they were asking
-                # for those resources
-                for msg in self._pend_queue:
-                    dbgprint('[%s] merging pended request message: %s' % (str(self), repr(msg)))
-                    self.send(msg)      # take care not to block on this!
-                self._pend_queue = []
+            if not self.full:
+                if set(self._res_held) >= set(self._res_needed):
+                    self.eat()
+                    # now that we've potentially dirtied previously "clean" resources,
+                    # we should handle pended requests
+                    for msg in self._pend_queue:
+                        dbgprint('[%s] handling pended message: %s' % (str(self), repr(msg)))
+                        msgtype, source, resource = msg
+                        assert msgtype == REQUEST
+                        assert resource in self._res_held
+                        assert resource.holder is self
+                        assert resource.dirty
+                        self.clean(resource)
+                        # remove the resource from our hold-list
+                        self._res_held = [res for res in self._res_held if res is not resource]
+                        resp = (RESPONSE, self, resource)
+                        dbgprint('[%s] sending response message to %s: %s' % (str(self), str(source), repr(resp)))
+                        source.send(resp)   # must block on sending response as we don't want that to get missed
+                    self._pend_queue = []
 
     def __str__(self):
         return 'Philosopher %d' % self.num
