@@ -2,7 +2,7 @@
 
 import sys
 import threading
-from Queue import Queue, Empty
+from Queue import Queue, Empty, Full
 
 
 stdout_lock = threading.RLock()     # a global lock to synchronize printing to stdout console
@@ -24,7 +24,7 @@ class Resource(object):
         # the "dirty" flag serves as a mechanism to prevent deadlock AND starvation
         # if this resource (chopstick) is "dirty", the current holder must give it up when asked
         # moreover, if the current holder is sending it over, he must clean it first
-        self._dirty = False      
+        self._dirty = True
 
     @property
     def num(self):
@@ -85,7 +85,7 @@ class Agent(object):
 
     @property
     def full(self):
-        return self._counter < self._capacity
+        return self._counter >= self._capacity
 
     @property
     def alive(self):
@@ -181,9 +181,9 @@ class Agent(object):
                         self._pend_queue.append(message)
                     else:
                         # we are holding a dirty resource that is requested, we must give it up
+                        self.clean(resource)
                         # remove the resource from our hold-list
                         self._res_held = [res for res in self._res_held if res is not resource]
-                        self.clean(resource)
                         resp = (RESPONSE, self, resource)
                         source.send(resp)
                 elif msgtype == RESPONSE:
