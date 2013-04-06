@@ -5,15 +5,34 @@ import threading
 from Queue import Queue, Empty, Full
 
 
+DEBUG = 1
+
 stdout_lock = threading.RLock()     # a global lock to synchronize printing to stdout console
 def syncprint(string):
     stdout_lock.acquire()
     print string
     stdout_lock.release()
 
+def dbgprint(string):
+    if DEBUG:
+        stdout_lock.acquire()
+        print string
+        stdout_lock.release()
 
-REQUEST = 0
-RESPONSE = 1
+
+class Message(object):
+
+    def __init__(self, msgtype):
+        self.msgtype = msgtype
+
+    def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
+        return 'Message(%s)' % self.msgtype
+
+REQUEST = Message('REQUEST')
+RESPONSE = Message('RESPONSE')
 
 
 class Resource(object):
@@ -53,7 +72,10 @@ class Resource(object):
         self._dirty = False
 
     def __str__(self):
-        return 'Resource(%s, dirty=%s)' % (repr(self._num), str(self._dirty))
+        return repr(self)
+
+    def __repr__(self):
+        return 'Resource(%s, dirty=%s, holder=%s)' % (repr(self._num), str(self._dirty), repr(self._holder))
 
 
 class Agent(object):
@@ -113,6 +135,7 @@ class Agent(object):
             assert False
             pass
         resource.mark_clean()
+        resource.holder = None
 
         # for printout purpose
         if resource is self._res_needed[0]:
@@ -161,9 +184,11 @@ class Agent(object):
                 # for each resource we need that we are not already holding
                 for res in [r for r in self._res_needed if r not in self._res_held]:
                     for neighbor in [n for n in self._neighbors if n.alive]:
-                        # send a request for the required resource
-                        req = (REQUEST, self, res)
-                        neighbor.send(req)
+                        # send a request for the required resource if said neighbor is currently holding this resource
+                        if res.holder is neighbor:
+                            req = (REQUEST, self, res)
+                            dbgprint('[%s] sending request message to %s: %s' % (str(self), str(neighbor), repr(req)))
+                            neighbor.send(req)
 
             # now, pop (block if empty) a message from this agent's message queue
             try:
@@ -174,17 +199,22 @@ class Agent(object):
                 msgtype, source, resource = message
                 if msgtype == REQUEST:
                     if resource not in self._res_held:
+                        assert resource.holder is not self
                         # nothing to do, drop this message
                         pass
                     elif resource.clean:
                         # our neighbor is requesting a clean resource, we can pend it
+                        assert resource.holder is self
                         self._pend_queue.append(message)
                     else:
                         # we are holding a dirty resource that is requested, we must give it up
+                        assert resource.holder is self
                         self.clean(resource)
+                        assert resource.holder is None
                         # remove the resource from our hold-list
                         self._res_held = [res for res in self._res_held if res is not resource]
                         resp = (RESPONSE, self, resource)
+                        dbgprint('[%s] sending response message to %s: %s' % (str(self), str(source), repr(resp)))
                         source.send(resp)
                 elif msgtype == RESPONSE:
                     assert resource.clean
@@ -199,11 +229,15 @@ class Agent(object):
                 # we should merge back requests that we pended because they were asking
                 # for those resources
                 for msg in self._pend_queue:
+                    dbgprint('[%s] merging pended request message: %s' % (str(self), repr(msg)))
                     self.send(msg)      # take care not to block on this!
                 self._pend_queue = []
 
     def __str__(self):
         return 'Philosopher %d' % self.num
+
+    def __repr__(self):
+        return str(self)
 
 
 def main(args):
