@@ -196,15 +196,18 @@ class Agent(object):
             except Empty:
                 pass
             else:
+                dbgprint('[%s] got message: %s' % (str(self), repr(message)))
                 msgtype, source, resource = message
                 if msgtype == REQUEST:
                     if resource not in self._res_held:
                         assert resource.holder is not self
                         # nothing to do, drop this message
+                        dbgprint('[%s] not holding requested resource; dropping message' % str(self))
                         pass
                     elif resource.clean:
                         # our neighbor is requesting a clean resource, we can pend it
                         assert resource.holder is self
+                        dbgprint('[%s] received a request for clean resource; pending said request' % str(self))
                         self._pend_queue.append(message)
                     else:
                         # we are holding a dirty resource that is requested, we must give it up
@@ -218,6 +221,7 @@ class Agent(object):
                         source.send(resp)
                 elif msgtype == RESPONSE:
                     assert resource.clean
+                    dbgprint('[%s] got a response message; claiming resource' % str(self))
                     self.claim(resource)
                 else:
                     assert False, 'Unknown message type'
