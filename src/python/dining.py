@@ -121,7 +121,7 @@ class Agent(object):
             which = 'right'
         else:
             assert False
-        print '%s puts down %s chopstick.' % (str(self), which)
+        syncprint('%s puts down %s chopstick.' % (str(self), which))
 
     def claim(self, resource):
         """Claim a resource by putting it into the hold-list.
@@ -138,7 +138,7 @@ class Agent(object):
             which = 'right'
         else:
             assert False
-        print '%s picks up %s chopstick.' % (str(self), which)
+        syncprint('%s picks up %s chopstick.' % (str(self), which))
 
     def send(self, msg):
         """Send a message to this agent by putting said message in said agent's
@@ -159,8 +159,8 @@ class Agent(object):
                 # all the resources we need
 
                 # for each resource we need that we are not already holding
-                for res in [r in self._res_needed if r not in self._res_held]:
-                    for neighbor in [n in self._neighbors if n.alive]:
+                for res in [r for r in self._res_needed if r not in self._res_held]:
+                    for neighbor in [n for n in self._neighbors if n.alive]:
                         # send a request for the required resource
                         req = (REQUEST, self, res)
                         neighbor.send(req)
@@ -182,7 +182,7 @@ class Agent(object):
                     else:
                         # we are holding a dirty resource that is requested, we must give it up
                         # remove the resource from our hold-list
-                        self._res_held = [res in self._res_held if res is not resource]
+                        self._res_held = [res for res in self._res_held if res is not resource]
                         self.clean(resource)
                         resp = (RESPONSE, self, resource)
                         source.send(resp)
@@ -209,18 +209,18 @@ class Agent(object):
 def main(args):
     # setting the stage, create the philosophers and chopsticks
     (a, b, c, d, e) = (
-            Chopstick(),
-            Chopstick(),
-            Chopstick(),
-            Chopstick(),
-            Chopstick(),
+            Resource('a'),
+            Resource('b'),
+            Resource('c'),
+            Resource('d'),
+            Resource('e'),
             )
     (p1, p2, p3, p4, p5) = (
-            Philosopher(1, a, e),
-            Philosopher(2, b, a),
-            Philosopher(3, c, b),
-            Philosopher(4, d, c),
-            Philosopher(5, e, d),
+            Agent(1, [a, e]),
+            Agent(2, [b, a]),
+            Agent(3, [c, b]),
+            Agent(4, [d, c]),
+            Agent(5, [e, d]),
             )
 
     # create thread objects for each philosopher
@@ -233,11 +233,11 @@ def main(args):
     print
 
     # initially, assign each shared chopstick to the lower-numbered philosopher
-    a._init_holder(p1)
-    b._init_holder(p2)
-    c._init_holder(p3)
-    d._init_holder(p4)
-    e._init_holder(p1)   # this breaks the cycle in the initial state!
+    p1.initialize([p2, p5], [a, e])
+    p2.initialize([p1, p3], [b,])
+    p3.initialize([p2, p4], [c,])
+    p4.initialize([p3, p5], [d,])
+    p5.initialize([p4, p1], [])     # this means p5 initially holds nothing, breaking the cycle
 
     for t in threads:
         t.start()
