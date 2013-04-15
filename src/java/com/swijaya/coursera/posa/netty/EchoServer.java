@@ -25,7 +25,10 @@ public class EchoServer {
     public static void main(String[] args) throws Exception {
         int port = PORT;
 
-        // The factory sets up a "reactor" configured with a thread pool to handle network events.
+        // The factory sets up a "reactor" configured with two thread pools to handle network events.
+        // The first argument configures a "boss" thread pool (by default containing only one boss thread)
+        // that accepts incoming connections, creates the channel abstractions for them, and pass them
+        // along to the thread pool of workers, configured in the second argument.
         final ChannelFactory factory = new NioServerSocketChannelFactory(
                 Executors.newCachedThreadPool(),
                 Executors.newCachedThreadPool());
