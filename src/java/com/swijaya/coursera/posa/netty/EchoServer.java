@@ -100,7 +100,7 @@ class EchoServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     @Override
-    public void messageReceived(final ChannelHandlerContext ctx, MessageEvent e) {
+    public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
         Channel ch = e.getChannel();
         ChannelBuffer m = (ChannelBuffer) e.getMessage();
 
@@ -135,7 +135,9 @@ class EchoServerHandler extends SimpleChannelUpstreamHandler {
         f.addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                System.out.println("Sent an echo to client: " + ctx.getChannel().getRemoteAddress().toString());
+                Channel ch = future.getChannel();
+                if (future.isSuccess())
+                    System.out.println("Sent an echo to client: " + ch.getRemoteAddress().toString());
             }
         });
     }
