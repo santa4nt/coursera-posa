@@ -75,7 +75,7 @@ public class EchoServer {
 class EchoServerHandler extends SimpleChannelUpstreamHandler {
 
     // dynamic buffer is used to store currently read bytes so far while we wait for an EOL marker
-    private final ChannelBuffer buf = dynamicBuffer();
+    private ChannelBuffer buf;
 
     @Override
     public void channelOpen(ChannelHandlerContext ctx, ChannelStateEvent e) {
@@ -100,15 +100,20 @@ class EchoServerHandler extends SimpleChannelUpstreamHandler {
     }
 
     @Override
-    public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
+    public void messageReceived(final ChannelHandlerContext ctx, MessageEvent e) {
         Channel ch = e.getChannel();
         ChannelBuffer m = (ChannelBuffer) e.getMessage();
+
+        if (buf == null) {
+            // create a temporary buffer to store echoed line
+            buf = dynamicBuffer();
+        }
 
         // read bytes from the event's channel buffer until we run out of bytes to read,
         // or we reach an EOL
         boolean eolFound = false;
-        for (int i = 0; i < m.capacity(); i++) {
-            byte b = m.getByte(i);
+        while (m.readable()) {
+            byte b = m.readByte();
             buf.writeByte(b);
             if ((char) b == '\n') {
                 // we've read a line
@@ -123,13 +128,14 @@ class EchoServerHandler extends SimpleChannelUpstreamHandler {
         }
 
         // we have a full line in the buffer; echo it to the client and reset buffers
-        ChannelFuture f = ch.write(m);
+        ChannelFuture f = ch.write(buf);
+        buf = null;     // let the current echo buffer go out of scope so that we create
+                        // a new buffer after every echoed line
+
         f.addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                // clear the dynamic buffer we allocate for this handler so that we do not
-                // run out of buffer space to write echoed lines to
-                buf.clear();
+                System.out.println("Sent an echo to client: " + ctx.getChannel().getRemoteAddress().toString());
             }
         });
     }
